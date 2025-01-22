@@ -49,13 +49,13 @@ impl<G: Group> MinRootIteration<G> {
     let mut x_i = *x_0;
     let mut y_i = *y_0;
     for _i in 0..num_iters {
-      let y_i_plus_1 = x_i + y_i;//compute x_i + y_i
+      let y_i_plus_1 = x_i.square() + y_i.square();//compute x_i + y_i
 
       // sanity check
       if cfg!(debug_assertions) {
         let ynext = y_i_plus_1 ;
        
-        assert_eq!(ynext, x_i + y_i);
+        assert_eq!(ynext, x_i.square() + y_i.square());
       }
 
       let x_i_plus_1 = y_i;
@@ -104,16 +104,21 @@ impl<G: Group> StepCircuit<G::Scalar> for MinRootCircuit<G> {
     let mut y_i = y_0;
     for i in 0..self.seq.len() {
       // non deterministic advice
+      let x_i_sq = x_i.square(cs.namespace(|| format!("x_i_sq_iter_{i}")))?;
+      let y_i_sq = y_i.square(cs.namespace(|| format!("y_i_sq_iter_{i}")))?;
       let y_i_plus_1 =
         AllocatedNum::alloc(cs.namespace(|| format!("y_i_plus_1_iter_{i}")), || {
           Ok(self.seq[i].y_i_plus_1)
         })?;
+        let target_value = AllocatedNum::alloc(cs.namespace(|| "target_2338775057"), || {
+          Ok(G::Scalar::from(2338775057u64))
+      })?;
       
 
 
 
       // check the following conditions hold:
-      // (i) y_i_plus_1 = (x_i + y_i),
+      // (i) y_i_plus_1 = (x_i^2 + y_i^2),
       // (ii) x_i_plus_1 = y_i
       // (1) constraints for condition (i) are below
       // (2) constraints for condition (ii) is avoided because we just used y_i wherever x_i_plus_1 is used
@@ -121,10 +126,17 @@ impl<G: Group> StepCircuit<G::Scalar> for MinRootCircuit<G> {
       // let x_i_plus_1_quad =
       //   x_i_plus_1_sq.square(cs.namespace(|| format!("x_i_plus_1_quad_{i}")))?;
       cs.enforce(
-        || format!(" 1* y_i_plus_1 = x_i + y_i_iter_{i}"),
+        || format!(" 1* y_i_plus_1 = x_i_sq + y_i_sq_iter_{i}"),
         |lc| lc + CS::one(),
         |lc| lc + y_i_plus_1.get_variable(),
-        |lc| lc + x_i.get_variable() + y_i.get_variable());
+        |lc| lc + x_i_sq.get_variable() + y_i_sq.get_variable());
+        if i == 1022 {
+          cs.enforce(
+              || "enforce a1022 = 2338775057",
+              |lc| lc + CS::one(),
+              |lc| lc + y_i.get_variable(),
+              |lc| lc + target_value.get_variable()
+          );}
 
       if i == self.seq.len() - 1 {
         z_out = Ok(vec![y_i.clone(), y_i_plus_1.clone()]);
@@ -145,18 +157,16 @@ fn main() {
   println!("Nova-based VDF with Fibanoacii function");
   println!("=========================================================");
 
-  let num_steps = 10;
-  for num_iters_per_step in [1024, 2048, 4096, 8192, 16384, 32768, 65536] {
-    // number of iterations of MinRoot per Nova's recursive step
+  let num_steps = 1024;
+  for num_iters_per_step in [1] {
+    // number of iterations of MinRoot per Nova'recursive step
     let circuit_primary = MinRootCircuit {
       seq: vec![
         MinRootIteration {
-        
-          x_i: <E1 as Engine>::Scalar::zero(),
-          
-          y_i: <E1 as Engine>::Scalar::one(),
-          x_i_plus_1: <E1 as Engine>::Scalar::one(),
-          y_i_plus_1: <E1 as Engine>::Scalar::one(),
+          x_i: <E1 as Engine>::Scalar::one(),
+          y_i: <E1 as Engine>::Scalar::from(3141592u64),
+          x_i_plus_1: <E1 as Engine>::Scalar::from(3141592u64),
+          y_i_plus_1: <E1 as Engine>::Scalar::from(9869600294465u64),
         };
         num_iters_per_step
       ],
@@ -238,7 +248,6 @@ fn main() {
 
     for (i, circuit_primary) in minroot_circuits.iter().enumerate() {
       let start = Instant::now();
-      
       let res = recursive_snark.prove_step(&pp, circuit_primary, &circuit_secondary);
       assert!(res.is_ok());
       println!(
