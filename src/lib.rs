@@ -1,4 +1,5 @@
 //! This library implements Nova, a high-speed recursive SNARK.
+
 #![deny(
   warnings,
   unused,
@@ -9,6 +10,7 @@
 )]
 #![allow(non_snake_case)]
 #![forbid(unsafe_code)]
+
 
 // private modules
 mod circuit;

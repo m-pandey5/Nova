@@ -36,30 +36,29 @@ impl<G: Group> MinRootIteration<G> {
   fn new(num_iters: usize, x_0: &G::Scalar, y_0: &G::Scalar) -> (Vec<G::Scalar>, Vec<Self>) {
     // exp = (p - 3 / 5), where p is the order of the group
     // x^{exp} mod p provides the fifth root of x
-    let exp = {
-      let p = G::group_params().2.to_biguint().unwrap();
-      let two = BigUint::parse_bytes(b"2", 10).unwrap();
-      let three = BigUint::parse_bytes(b"3", 10).unwrap();
-      let five = BigUint::parse_bytes(b"5", 10).unwrap();
-      let five_inv = five.modpow(&(&p - &two), &p);
-      (&five_inv * (&p - &three)) % &p
-    };
+    // let exp = {
+    //   let p = G::group_params().2.to_biguint().unwrap();
+    //   let two = BigUint::parse_bytes(b"2", 10).unwrap();
+    //   let three = BigUint::parse_bytes(b"3", 10).unwrap();
+    //   let five = BigUint::parse_bytes(b"5", 10).unwrap();
+    //   let five_inv = five.modpow(&(&p - &two), &p);
+    //   (&five_inv * (&p - &three)) % &p
+    // };
 
     let mut res = Vec::new();
     let mut x_i = *x_0;
     let mut y_i = *y_0;
     for _i in 0..num_iters {
-      let x_i_plus_1 = (x_i + y_i).pow_vartime(exp.to_u64_digits()); // computes the fifth root of x_i + y_i
+      let y_i_plus_1 = (x_i + y_i);//compute x_i + y_i
 
       // sanity check
       if cfg!(debug_assertions) {
-        let sq = x_i_plus_1 * x_i_plus_1;
-        let quad = sq * sq;
-        let fifth = quad * x_i_plus_1;
-        assert_eq!(fifth, x_i + y_i);
+        let ynext = y_i_plus_1 ;
+       
+        assert_eq!(ynext, x_i + y_i);
       }
 
-      let y_i_plus_1 = x_i;
+      let x_i_plus_1 = y_i;
 
       res.push(Self {
         x_i,
@@ -70,11 +69,9 @@ impl<G: Group> MinRootIteration<G> {
 
       x_i = x_i_plus_1;
       y_i = y_i_plus_1;
-      
     }
 
     let z0 = vec![*x_0, *y_0];
- 
 
     (z0, res)
   }
@@ -107,33 +104,36 @@ impl<G: Group> StepCircuit<G::Scalar> for MinRootCircuit<G> {
     let mut y_i = y_0;
     for i in 0..self.seq.len() {
       // non deterministic advice
-      let x_i_plus_1 =
-        AllocatedNum::alloc(cs.namespace(|| format!("x_i_plus_1_iter_{i}")), || {
-          Ok(self.seq[i].x_i_plus_1)
+      let y_i_plus_1 =
+        AllocatedNum::alloc(cs.namespace(|| format!("y_i_plus_1_iter_{i}")), || {
+          Ok(self.seq[i].y_i_plus_1)
         })?;
+      
+
+
 
       // check the following conditions hold:
-      // (i) x_i_plus_1 = (x_i + y_i)^{1/5}, which can be more easily checked with x_i_plus_1^5 = x_i + y_i
-      // (ii) y_i_plus_1 = x_i
+      // (i) y_i_plus_1 = (x_i + y_i),
+      // (ii) x_i_plus_1 = y_i
       // (1) constraints for condition (i) are below
-      // (2) constraints for condition (ii) is avoided because we just used x_i wherever y_i_plus_1 is used
-      let x_i_plus_1_sq = x_i_plus_1.square(cs.namespace(|| format!("x_i_plus_1_sq_iter_{i}")))?;
-      let x_i_plus_1_quad =
-        x_i_plus_1_sq.square(cs.namespace(|| format!("x_i_plus_1_quad_{i}")))?;
+      // (2) constraints for condition (ii) is avoided because we just used y_i wherever x_i_plus_1 is used
+      // let x_i_plus_1_sq = x_i_plus_1.square(cs.namespace(|| format!("x_i_plus_1_sq_iter_{i}")))?;
+      // let x_i_plus_1_quad =
+      //   x_i_plus_1_sq.square(cs.namespace(|| format!("x_i_plus_1_quad_{i}")))?;
       cs.enforce(
-        || format!("x_i_plus_1_quad * x_i_plus_1 = x_i + y_i_iter_{i}"),
-        |lc| lc + x_i_plus_1_quad.get_variable(),
-        |lc| lc + x_i_plus_1.get_variable(),
-        |lc| lc + x_i.get_variable() + y_i.get_variable(),
-      );
+        || format!(" 1* y_i_plus_1 = x_i + y_i_iter_{i}"),
+        |lc| lc + CS::one(),
+        |lc| lc + y_i_plus_1.get_variable(),
+        |lc| lc + x_i.get_variable() + y_i.get_variable());
 
       if i == self.seq.len() - 1 {
-        z_out = Ok(vec![x_i_plus_1.clone(), x_i.clone()]);
+        z_out = Ok(vec![y_i.clone(), y_i_plus_1.clone()]);
       }
 
       // update x_i and y_i for the next iteration
-      y_i = x_i;
-      x_i = x_i_plus_1;
+      x_i = y_i;
+      y_i = y_i_plus_1;
+      
     }
 
     z_out
@@ -142,7 +142,7 @@ impl<G: Group> StepCircuit<G::Scalar> for MinRootCircuit<G> {
 
 /// cargo run --release --example minroot
 fn main() {
-  println!("Nova-based VDF with MinRoot delay function");
+  println!("Nova-based VDF with Fibanoacii function");
   println!("=========================================================");
 
   let num_steps = 10;
@@ -152,9 +152,9 @@ fn main() {
       seq: vec![
         MinRootIteration {
           x_i: <E1 as Engine>::Scalar::zero(),
-          y_i: <E1 as Engine>::Scalar::zero(),
-          x_i_plus_1: <E1 as Engine>::Scalar::zero(),
-          y_i_plus_1: <E1 as Engine>::Scalar::zero(),
+          y_i: <E1 as Engine>::Scalar::one(),
+          x_i_plus_1: <E1 as Engine>::Scalar::one(),
+          y_i_plus_1: <E1 as Engine>::Scalar::one(),
         };
         num_iters_per_step
       ],
@@ -162,7 +162,7 @@ fn main() {
 
     let circuit_secondary = TrivialCircuit::default();
 
-    println!("Proving {num_iters_per_step} iterations of MinRoot per step");
+    println!("Proving {num_iters_per_step} iterations of fibonacci per step");
 
     // produce public parameters
     let start = Instant::now();
@@ -205,20 +205,6 @@ fn main() {
       &<E1 as Engine>::Scalar::zero(),
       &<E1 as Engine>::Scalar::one(),
     );
-
-// Add these lines to print all iterations:
-// println!("MinRoot Iterations:");
-// for (index, iteration) in minroot_iterations.iter().enumerate() {
-//     println!(
-//         "Iteration {}: x_i: {:?}, y_i: {:?}, x_i_plus_1: {:?}, y_i_plus_1: {:?}",
-//         index,
-//         iteration.x_i,
-//         iteration.y_i,
-//         iteration.x_i_plus_1,
-//         iteration.y_i_plus_1
-//     );
-// }
-
     let minroot_circuits = (0..num_steps)
       .map(|i| MinRootCircuit {
         seq: (0..num_iters_per_step)
@@ -231,16 +217,6 @@ fn main() {
           .collect::<Vec<_>>(),
       })
       .collect::<Vec<_>>();
-    // for (step, circuit) in minroot_circuits.iter().enumerate() {
-    //   println!("Step {}:", step);
-    //   for (iter, iteration) in circuit.seq.iter().enumerate() {
-    //       println!(
-    //           "  Iteration {}: x_i: {:?}, y_i: {:?}",
-    //           iter,
-    //           iteration.x_i,
-    //           iteration.y_i
-    //       );
-    //   }}
 
     let z0_secondary = vec![<E2 as Engine>::Scalar::one()];
 
@@ -268,6 +244,7 @@ fn main() {
         res.is_ok(),
         start.elapsed()
       );
+     
     }
 
     // verify the recursive SNARK
